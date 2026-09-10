@@ -1,0 +1,10 @@
+[
+  {"entity_kind": "dns_name", "fqdn": "www.example.org", "asserts_present": true,
+   "resolves_to_ip": "198.51.100.10", "records": {"A": ["198.51.100.10"]}},
+
+  {"entity_kind": "dns_name", "fqdn": "old.example.org", "asserts_present": true,
+   "records": {"A": []}},
+
+  {"entity_kind": "dns_name", "fqdn": "cloudthing.example.org", "asserts_present": true,
+   "resolves_to_ip": "192.0.2.30", "records": {"A": ["192.0.2.30"]}}
+]

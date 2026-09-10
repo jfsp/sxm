@@ -1,0 +1,24 @@
+# Set SITE_ADDRESS in .env to your FQDN for automatic Let's Encrypt certs,
+# e.g. SITE_ADDRESS=sxm.example.org. Defaults to localhost (Caddy internal CA)
+# for a self-contained local Proxmox deployment.
+{$SITE_ADDRESS:localhost} {
+	encode gzip
+
+	# API + OpenAPI docs
+	@api path /api/* /docs /openapi.json
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# Static read-only SOC UI
+	handle {
+		reverse_proxy ui:80
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+	}
+}

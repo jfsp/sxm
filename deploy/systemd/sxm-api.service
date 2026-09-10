@@ -1,0 +1,22 @@
+[Unit]
+Description=SXM API (uvicorn, no-Docker POC)
+After=network.target
+
+[Service]
+Type=simple
+User=sxm
+Group=sxm
+WorkingDirectory=/opt/sxm/api
+EnvironmentFile=/opt/sxm/sxm.env
+ExecStart=/opt/sxm/api/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/sxm/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SXM — Surface Exposure Management</title>
+<style>
+  :root{--bg:#0b0f14;--panel:#111823;--panel2:#0e141d;--line:#1e2a38;--fg:#c9d6e3;
+    --dim:#7c8ea3;--acc:#4aa3ff;--ok:#3ddc84;--warn:#ffb020;--bad:#ff5c5c;--cand:#b18bff;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel2);flex-wrap:wrap}
+  header h1{font-size:15px;margin:0}header h1 span{color:var(--acc)}
+  nav{display:flex;gap:4px;flex-wrap:wrap}
+  nav button{background:transparent;border:1px solid transparent;color:var(--dim);
+    padding:5px 10px;border-radius:5px;cursor:pointer;font:inherit}
+  nav button.active{color:var(--fg);border-color:var(--line);background:var(--panel)}
+  .who{color:var(--dim);font-size:12px}.who b{color:var(--fg)}
+  button{font:inherit;color:var(--fg);background:#17222f;border:1px solid var(--line);
+    padding:5px 11px;border-radius:5px;cursor:pointer}
+  button:hover{border-color:var(--acc)}button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:#17324f;border-color:#24507d}
+  button.sm{padding:3px 8px;font-size:11px}
+  main{padding:16px;max-width:1200px;margin:0 auto}
+  .grid{display:grid;gap:14px}
+  .cards{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
+  .card .n{font-size:24px;font-weight:600}
+  .card .l{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+  .card.bad .n{color:var(--bad)}.card.warn .n{color:var(--warn)}.card.cand .n{color:var(--cand)}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;margin-bottom:14px}
+  section h2{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);
+    margin:0 0 10px;font-weight:600}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:12px;vertical-align:top}
+  th{color:var(--dim);font-weight:500}tr:last-child td{border-bottom:none}
+  tbody tr.click{cursor:pointer}tbody tr.click:hover{background:#0e1620}
+  .pill{padding:1px 7px;border-radius:10px;font-size:11px;border:1px solid var(--line)}
+  .exposed,.owned{color:var(--ok);border-color:#1f5f3a}
+  .not_observed{color:var(--warn);border-color:#5f4a1f}
+  .gone,.disappeared{color:var(--bad);border-color:#5f2020}
+  .first_seen,.appeared{color:var(--acc);border-color:#1f3a5f}
+  .candidate{color:var(--cand);border-color:#3d2f66}
+  input,select,textarea{background:var(--panel2);border:1px solid var(--line);border-radius:5px;
+    color:var(--fg);font:inherit;padding:5px 7px}
+  textarea{width:100%;min-height:52px}
+  label{color:var(--dim);font-size:11px;display:block;margin:6px 0 2px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
+  .muted{color:var(--dim);font-size:11px}.empty{color:var(--dim);padding:8px}
+  .err{color:var(--bad);min-height:16px;font-size:12px}
+  .ok{color:var(--ok);font-size:12px}
+  #login{max-width:320px;margin:12vh auto;text-align:center}
+  #login input{width:100%;padding:9px;margin:6px 0}
+  #login button{width:100%;margin-top:8px}
+  #detail{position:fixed;top:0;right:0;height:100%;width:min(440px,100%);background:var(--panel2);
+    border-left:1px solid var(--line);padding:16px;overflow:auto;transform:translateX(100%);
+    transition:transform .15s;z-index:20}
+  #detail.open{transform:none}
+  #detail .x{float:right}
+  kbd{background:#0e1620;border:1px solid var(--line);border-radius:4px;padding:0 5px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="detail"></div>
+
+<script>
+const API="/api";
+let token=sessionStorage.getItem("sxm_token")||null;
+let role=sessionStorage.getItem("sxm_role")||null;
+let tab="dashboard";
+const isAdmin=()=>role==="admin";
+const isAnalyst=()=>role==="admin"||role==="analyst";
+
+// OIDC: capture token from URL fragment (#access_token=...&role=...)
+(function(){
+  if(location.hash.includes("access_token=")){
+    const p=new URLSearchParams(location.hash.slice(1));
+    token=p.get("access_token"); role=p.get("role");
+    sessionStorage.setItem("sxm_token",token); sessionStorage.setItem("sxm_role",role);
+    history.replaceState(null,"","/");
+  }
+})();
+
+async function api(path,opts={}){
+  const r=await fetch(API+path,{...opts,headers:{Authorization:"Bearer "+token,
+    "Content-Type":"application/json",...(opts.headers||{})}});
+  if(r.status===401){logout();throw new Error("unauthorized");}
+  if(!r.ok){let t=await r.text();try{t=JSON.parse(t).detail||t}catch(e){}throw new Error(t);}
+  return r.status===204?null:r.json();
+}
+const jget=(p)=>api(p);
+const jpost=(p,b)=>api(p,{method:"POST",body:JSON.stringify(b)});
+const jpatch=(p,b)=>api(p,{method:"PATCH",body:JSON.stringify(b)});
+function logout(){token=role=null;sessionStorage.clear();render();}
+
+async function login(u,p){
+  const r=await fetch(API+"/auth/token",{method:"POST",
+    headers:{"Content-Type":"application/x-www-form-urlencoded"},
+    body:new URLSearchParams({username:u,password:p})});
+  if(!r.ok)throw new Error("Invalid credentials");
+  const d=await r.json();token=d.access_token;role=d.role;
+  sessionStorage.setItem("sxm_token",token);sessionStorage.setItem("sxm_role",role);
+}
+
+const pill=(v)=>`<span class="pill ${v}">${v}</span>`;
+const esc=(s)=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+// ---- lifecycle transition matrix (mirrors backend) ----
+const LC_NEXT={new:["approved","obsolete"],approved:["in_production","obsolete"],
+  in_production:["obsolete"],obsolete:["in_production","removed"],removed:[]};
+
+function loginView(){
+  const app=document.getElementById("app");
+  app.innerHTML=`<div id="login"><h1><span style="color:#4aa3ff">SXM</span></h1>
+    <div class="muted">Surface Exposure Management</div>
+    <input id="u" placeholder="username" autofocus><input id="p" type="password" placeholder="password">
+    <button id="go" class="primary">Sign in</button>
+    <div class="err" id="err"></div>
+    <div class="muted" style="margin-top:10px"><a href="/api/auth/oidc/login" style="color:#4aa3ff">Sign in with SSO</a></div></div>`;
+  const go=async()=>{try{await login(u.value.trim(),p.value);render();}
+    catch(e){document.getElementById("err").textContent=e.message;}};
+  app.querySelector("#go").onclick=go;
+  app.querySelectorAll("input").forEach(i=>i.addEventListener("keydown",e=>{if(e.key==="Enter")go();}));
+}
+
+function shell(body){
+  const tabs=["dashboard","services",...(isAdmin()?["sources","alerts","users"]:[])];
+  return `<header>
+    <h1><span>SXM</span></h1>
+    <nav>${tabs.map(t=>`<button data-tab="${t}" class="${t===tab?"active":""}">${t}</button>`).join("")}</nav>
+    <div><span class="who">role <b>${role}</b></span>
+      ${isAdmin()?`<button class="sm" id="runcycle">run cycle</button>
+        <button class="sm" id="snap">snapshot</button>`:""}
+      <button class="sm" id="logout">logout</button></div>
+  </header><main id="main">${body}</main>`;
+}
+
+function bindShell(){
+  document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render();});
+  document.getElementById("logout").onclick=logout;
+  const rc=document.getElementById("runcycle");
+  if(rc)rc.onclick=async()=>{rc.disabled=true;rc.textContent="running…";
+    try{await jpost("/admin/run-cycle",{});}catch(e){alert(e.message);}render();};
+  const sn=document.getElementById("snap");
+  if(sn)sn.onclick=async()=>{try{await jpost("/admin/snapshot?granularity=weekly",{});sn.textContent="snapshot ✓";}catch(e){alert(e.message);}};
+}
+
+// ============================ DASHBOARD ================================= //
+async function viewDashboard(){
+  const [s,ev,dns,wr]=await Promise.all([jget("/dashboard/summary"),
+    jget("/dashboard/events?limit=25"),jget("/dashboard/dns-dangling"),jget("/dashboard/weekly-report")]);
+  const ex=s.by_exposure,lc=s.by_lifecycle,at=s.by_attribution;
+  const card=(n,l,c="")=>`<div class="card ${c}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const rows=(arr,cols)=>arr.length?arr.map(cols).join(""):`<tr><td colspan=6 class="empty">none</td></tr>`;
+  return `<div class="grid cards">
+      ${card(s.services_total,"services")}${card(ex.exposed||0,"exposed")}
+      ${card(ex.not_observed||0,"not observed","warn")}${card(ex.gone||0,"gone","bad")}
+      ${card(at.candidate||0,"candidates","cand")}${card(s.dns_nothing_behind,"dns · empty","warn")}</div>
+    <section><h2>distribution</h2>
+      <div class="muted">exposure: ${Object.entries(ex).map(([k,v])=>`<b style="color:var(--fg)">${v}</b> ${k}`).join(" · ")}</div>
+      <div class="muted" style="margin-top:4px">lifecycle: ${Object.entries(lc).map(([k,v])=>`<b style="color:var(--fg)">${v}</b> ${k}`).join(" · ")}</div>
+      <div class="muted" style="margin-top:4px">attribution: ${Object.entries(at).map(([k,v])=>`<b style="color:var(--fg)">${v}</b> ${k}`).join(" · ")}</div>
+      <div class="muted" style="margin-top:8px">last 7d — appeared <b style="color:var(--fg)">${wr.appeared}</b>, disappeared <b style="color:var(--fg)">${wr.disappeared}</b>, lifecycle changes <b style="color:var(--fg)">${wr.lifecycle_transitions}</b></div>
+    </section>
+    <section><h2>coverage gaps · externals present, Tenable missed</h2><table>
+      <thead><tr><th>endpoint</th><th>score</th><th>present sources</th></tr></thead><tbody>
+      ${rows(s.coverage_gaps,g=>`<tr><td>${g.endpoint}</td><td>${g.score}</td><td class="muted">${g.present_sources.join(", ")}</td></tr>`)}
+      </tbody></table></section>
+    <section><h2>recent exposure events</h2><table>
+      <thead><tr><th>event</th><th>endpoint</th><th>score</th><th>at</th></tr></thead><tbody>
+      ${rows(ev,e=>`<tr><td>${pill(e.type)}</td><td>${e.endpoint}</td><td>${e.confidence}</td><td class="muted">${new Date(e.at).toLocaleString()}</td></tr>`)}
+      </tbody></table></section>
+    <section><h2>dns names with nothing behind them</h2><table>
+      <thead><tr><th>fqdn</th><th>records</th></tr></thead><tbody>
+      ${rows(dns,d=>`<tr><td>${esc(d.fqdn)}</td><td class="muted">${esc(JSON.stringify(d.records))}</td></tr>`)}
+      </tbody></table></section>`;
+}
+
+// ============================ SERVICES ================================= //
+let svcFilter={};
+async function viewServices(){
+  const qs=Object.entries(svcFilter).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join("&");
+  const list=await jget("/services"+(qs?`?${qs}`:""));
+  const sel=(name,opts)=>`<select data-f="${name}"><option value="">${name}: any</option>
+    ${opts.map(o=>`<option ${svcFilter[name]===o?"selected":""}>${o}</option>`).join("")}</select>`;
+  const body=`<section><h2>services (${list.length})</h2>
+    <div class="row" style="margin-bottom:10px">
+      ${sel("exposure",["first_seen","exposed","not_observed","gone"])}
+      ${sel("lifecycle",["new","approved","in_production","obsolete","removed"])}
+      ${sel("attribution",["owned","candidate"])}</div>
+    <table><thead><tr><th>endpoint</th><th>type</th><th>score</th><th>exposure</th><th>lifecycle</th><th>attr</th></tr></thead>
+    <tbody>${list.map(s=>`<tr class="click" data-id="${s.id}">
+      <td>${svcEndpoint(s)}</td><td>${esc(s.service_type)}</td><td>${s.confidence_score}</td>
+      <td>${pill(s.exposure_state)}</td><td>${pill(s.lifecycle_status)}</td><td>${pill(s.attribution)}</td></tr>`).join("")
+      ||`<tr><td colspan=6 class="empty">no services — run a cycle</td></tr>`}</tbody></table></section>`;
+  return body;
+}
+function svcEndpoint(s){return `${s.ip?s.ip+":":""}${s.port}/${s.protocol}`;}
+
+async function bindServices(){
+  document.querySelectorAll("select[data-f]").forEach(sl=>sl.onchange=()=>{
+    svcFilter[sl.dataset.f]=sl.value;render();});
+  document.querySelectorAll("tr.click").forEach(tr=>tr.onclick=()=>openDetail(tr.dataset.id));
+}
+
+async function openDetail(id){
+  const d=document.getElementById("detail");
+  d.classList.add("open");d.innerHTML=`<div class="muted">loading…</div>`;
+  let s,ann,ous;
+  try{[s,ann,ous]=await Promise.all([jget(`/services/${id}`),
+    jget(`/services/${id}/annotations`),jget(`/org-units`).catch(()=>[])]);}
+  catch(e){d.innerHTML=`<button class="x sm" onclick="closeDetail()">close</button><div class="err">${e.message}</div>`;return;}
+  const transitions=isAnalyst()?(LC_NEXT[s.lifecycle_status]||[]):[];
+  d.innerHTML=`<button class="x sm" onclick="closeDetail()">close</button>
+    <h2 style="margin:0 0 4px">${svcEndpoint(s)}</h2>
+    <div class="muted">${esc(s.service_type||"")} · ${pill(s.exposure_state)} ${pill(s.lifecycle_status)} ${pill(s.attribution)}</div>
+    <div class="muted" style="margin:6px 0">score <b style="color:var(--fg)">${s.confidence_score}</b>${s.coverage_gap?' · <span class="warn" style="color:var(--warn)">coverage gap</span>':""}
+      · present: ${(s.present_sources||[]).join(", ")||"—"}</div>
+    <div class="muted">first ${new Date(s.first_seen).toLocaleDateString()} · last ${new Date(s.last_seen).toLocaleDateString()}</div>
+
+    ${isAnalyst()?`<section style="margin-top:12px"><h2>lifecycle</h2>
+      ${transitions.length?transitions.map(t=>`<button class="sm" data-lc="${t}">→ ${t}</button>`).join(" "):`<span class="muted">no manual transitions</span>`}
+      <div class="err" id="lcerr"></div></section>`:""}
+
+    ${isAnalyst()?`<section><h2>org unit</h2>
+      <div class="row"><select id="ou"><option value="">unassigned</option>
+        ${ous.map(o=>`<option value="${o.id}" ${s.org_unit_id===o.id?"selected":""}>${esc(o.name)}</option>`).join("")}</select>
+        <button class="sm" id="assignou">assign</button></div></section>`:""}
+
+    ${isAdmin()?`<section><h2>probe</h2>
+      <button class="sm" id="probe">nmap probe this service</button><div id="probeout" class="muted"></div></section>`:""}
+
+    <section><h2>annotations</h2>
+      ${isAnalyst()?`<textarea id="annbody" placeholder="add a note…"></textarea>
+        <button class="sm" id="addann" style="margin-top:6px">add</button>`:""}
+      <div id="annlist" style="margin-top:8px">${ann.map(a=>`<div style="border-bottom:1px solid var(--line);padding:5px 0">
+        <div class="muted">${new Date(a.created_at).toLocaleString()}</div>${esc(a.body)}</div>`).join("")||'<div class="muted">none</div>'}</div>
+    </section>`;
+
+  d.querySelectorAll("[data-lc]").forEach(b=>b.onclick=async()=>{
+    try{await jpost(`/services/${id}/lifecycle`,{to_status:b.dataset.lc});openDetail(id);renderInto("main");}
+    catch(e){document.getElementById("lcerr").textContent=e.message;}});
+  const ao=d.querySelector("#assignou");
+  if(ao)ao.onclick=async()=>{const v=d.querySelector("#ou").value;
+    await jpost(`/services/${id}/org-unit`,{org_unit_id:v?+v:null});openDetail(id);};
+  const pb=d.querySelector("#probe");
+  if(pb)pb.onclick=async()=>{pb.disabled=true;pb.textContent="probing…";
+    try{const r=await jpost("/admin/probe",{ip:s.ip,port:s.port,protocol:s.protocol});
+      d.querySelector("#probeout").textContent=`present=${r.present}`;openDetail(id);}catch(e){d.querySelector("#probeout").textContent=e.message;}};
+  const aa=d.querySelector("#addann");
+  if(aa)aa.onclick=async()=>{const b=d.querySelector("#annbody").value.trim();if(!b)return;
+    await jpost(`/services/${id}/annotations`,{body:b});openDetail(id);};
+}
+function closeDetail(){document.getElementById("detail").classList.remove("open");}
+
+// ============================ SOURCES (admin) ========================== //
+async function viewSources(){
+  const [srcs,seeds,ous]=await Promise.all([jget("/admin/sources"),jget("/seeds"),jget("/org-units")]);
+  return `<section><h2>sources · weight & freshness</h2><table>
+    <thead><tr><th>name</th><th>weight</th><th>staleness(d)</th><th>enabled</th><th></th></tr></thead><tbody>
+    ${srcs.map(s=>`<tr>
+      <td>${s.name}</td>
+      <td><input style="width:56px" value="${s.weight}" data-w="${s.id}"></td>
+      <td><input style="width:56px" value="${s.staleness_days}" data-st="${s.id}"></td>
+      <td><input type="checkbox" data-en="${s.id}" ${s.enabled?"checked":""}></td>
+      <td><button class="sm" data-savesrc="${s.id}">save</button></td></tr>`).join("")}
+    </tbody></table></section>
+  <section><h2>ownership seeds</h2>
+    <div class="row"><select id="seedtype"><option>CIDR</option><option>ASN</option><option>Domain</option></select>
+      <input id="seedval" placeholder="value e.g. 203.0.113.0/24"><button class="sm" id="addseed">add</button></div>
+    <table style="margin-top:8px"><thead><tr><th>type</th><th>value</th></tr></thead><tbody>
+    ${seeds.map(s=>`<tr><td>${s.type}</td><td>${esc(s.value)}</td></tr>`).join("")}</tbody></table></section>
+  <section><h2>org units</h2>
+    <div class="row"><input id="ouname" placeholder="new OU name"><button class="sm" id="addou">add</button></div>
+    <table style="margin-top:8px"><tbody>${ous.map(o=>`<tr><td>${esc(o.name)}</td></tr>`).join("")||'<tr><td class="empty">none</td></tr>'}</tbody></table></section>`;
+}
+function bindSources(){
+  document.querySelectorAll("[data-savesrc]").forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.savesrc;
+    const w=+document.querySelector(`[data-w="${id}"]`).value;
+    const st=+document.querySelector(`[data-st="${id}"]`).value;
+    const en=document.querySelector(`[data-en="${id}"]`).checked;
+    b.textContent="…";try{await jpatch(`/admin/sources/${id}`,{weight:w,staleness_days:st,enabled:en});b.textContent="saved";}
+    catch(e){alert(e.message);b.textContent="save";}});
+  const as=document.getElementById("addseed");
+  if(as)as.onclick=async()=>{await jpost("/seeds",{type:seedtype.value,value:seedval.value.trim()});render();};
+  const ao=document.getElementById("addou");
+  if(ao)ao.onclick=async()=>{await jpost("/org-units",{name:ouname.value.trim()});render();};
+}
+
+// ============================ ALERTS (admin) =========================== //
+async function viewAlerts(){
+  const [chs,rules]=await Promise.all([jget("/admin/alert-channels"),jget("/admin/alert-rules")]);
+  return `<section><h2>channels</h2>
+    <div class="row"><select id="chkind"><option>console</option><option>webhook</option><option>email</option><option>telegram</option></select>
+      <input id="chcfg" style="min-width:280px" placeholder='config json e.g. {"url":"https://…"}'>
+      <button class="sm" id="addch">add</button></div>
+    <table style="margin-top:8px"><thead><tr><th>id</th><th>kind</th><th>enabled</th></tr></thead><tbody>
+    ${chs.map(c=>`<tr><td>${c.id}</td><td>${c.kind}</td><td>${c.enabled}</td></tr>`).join("")}</tbody></table></section>
+  <section><h2>rules</h2>
+    <div class="row"><select id="rev"><option>appeared</option><option>disappeared</option></select>
+      <input id="rch" style="width:80px" placeholder="channel id">
+      <input id="rded" style="width:110px" placeholder="dedup s (3600)">
+      <input id="rthr" style="width:110px" placeholder="throttle s (0)">
+      <button class="sm" id="addrule">add</button></div>
+    <table style="margin-top:8px"><thead><tr><th>event</th><th>channel</th><th>dedup</th><th>enabled</th></tr></thead><tbody>
+    ${rules.map(r=>`<tr><td>${pill(r.event_type)}</td><td>${r.channel_id}</td><td>${r.dedup_window_seconds}s</td><td>${r.enabled}</td></tr>`).join("")}</tbody></table></section>`;
+}
+function bindAlerts(){
+  const ac=document.getElementById("addch");
+  if(ac)ac.onclick=async()=>{let cfg={};try{cfg=chcfg.value?JSON.parse(chcfg.value):{}}catch(e){return alert("bad json");}
+    await jpost("/admin/alert-channels",{kind:chkind.value,config:cfg,enabled:true});render();};
+  const ar=document.getElementById("addrule");
+  if(ar)ar.onclick=async()=>{await jpost("/admin/alert-rules",{event_type:rev.value,channel_id:+rch.value,
+    dedup_window_seconds:+(rded.value||3600),throttle_seconds:+(rthr.value||0)});render();};
+}
+
+// ============================ USERS (admin) ============================ //
+async function viewUsers(){
+  const us=await jget("/admin/users");
+  return `<section><h2>users</h2>
+    <div class="row"><input id="nu" placeholder="username"><input id="np" type="password" placeholder="password">
+      <select id="nr"><option>analyst</option><option>manager</option><option>admin</option></select>
+      <button class="sm" id="adduser">create</button></div>
+    <table style="margin-top:8px"><thead><tr><th>id</th><th>username</th><th>email</th><th>sso</th><th>enabled</th><th></th></tr></thead><tbody>
+    ${us.map(u=>`<tr><td>${u.id}</td><td>${esc(u.username)}</td><td class="muted">${esc(u.email||"")}</td>
+      <td>${u.oidc_sub?"✓":""}</td><td>${u.enabled}</td>
+      <td><button class="sm" data-tog="${u.id}" data-en="${u.enabled}">${u.enabled?"disable":"enable"}</button></td></tr>`).join("")}
+    </tbody></table></section>`;
+}
+function bindUsers(){
+  const a=document.getElementById("adduser");
+  if(a)a.onclick=async()=>{try{await jpost("/admin/users",{username:nu.value.trim(),password:np.value,role:nr.value});render();}catch(e){alert(e.message);}};
+  document.querySelectorAll("[data-tog]").forEach(b=>b.onclick=async()=>{
+    await jpatch(`/admin/users/${b.dataset.tog}`,{enabled:b.dataset.en!=="true"});render();});
+}
+
+// ============================ ROUTER =================================== //
+const VIEWS={dashboard:[viewDashboard,null],services:[viewServices,bindServices],
+  sources:[viewSources,bindSources],alerts:[viewAlerts,bindAlerts],users:[viewUsers,bindUsers]};
+
+async function renderInto(){
+  const [view,bind]=VIEWS[tab]||VIEWS.dashboard;
+  const main=document.getElementById("main");
+  try{main.innerHTML=await view();}catch(e){main.innerHTML=`<div class="err">${e.message}</div>`;return;}
+  if(bind)await bind();
+}
+async function render(){
+  if(!token){loginView();return;}
+  document.getElementById("app").innerHTML=shell(`<div class="empty">loading…</div>`);
+  bindShell();
+  await renderInto();
+}
+render();
+</script>
+</body>
+</html>

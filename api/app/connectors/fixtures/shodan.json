@@ -1,0 +1,7 @@
+[
+  {"entity_kind": "service", "ip": "203.0.113.5", "port": 8443, "protocol": "tcp",
+   "service_type": "https", "asserts_present": true},
+
+  {"entity_kind": "service", "ip": "192.0.2.30", "port": 443, "protocol": "tcp",
+   "service_type": "https", "asn": "AS64511", "netblock": "192.0.2.0/24", "asserts_present": true}
+]

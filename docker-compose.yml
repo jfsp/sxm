@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sxm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sxm}
+      POSTGRES_DB: ${POSTGRES_DB:-sxm}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sxm}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./api
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # No published port: the proxy is the only public ingress.
+    expose:
+      - "8000"
+
+  worker:
+    build: ./api
+    command: celery -A app.tasks.celery_app.celery worker --loglevel=info
+    env_file: .env
+    depends_on:
+      - api
+      - redis
+    restart: unless-stopped
+
+  beat:
+    build: ./api
+    command: celery -A app.tasks.celery_app.celery beat --loglevel=info
+    env_file: .env
+    depends_on:
+      - api
+      - redis
+    restart: unless-stopped
+
+  ui:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./ui:/usr/share/nginx/html:ro
+    expose:
+      - "80"
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2-alpine
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    depends_on:
+      - api
+      - ui
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

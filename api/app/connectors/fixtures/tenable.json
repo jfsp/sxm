@@ -1,0 +1,14 @@
+[
+  {"entity_kind": "service", "ip": "198.51.100.10", "port": 443, "protocol": "tcp",
+   "service_type": "https", "asn": "AS64500", "netblock": "198.51.100.0/24",
+   "tls_info": {"subject": "www.example.org", "issuer": "Example CA"}, "asserts_present": true},
+
+  {"entity_kind": "service", "ip": "198.51.100.10", "port": 22, "protocol": "tcp",
+   "service_type": "ssh", "asn": "AS64500", "netblock": "198.51.100.0/24", "asserts_present": true},
+
+  {"entity_kind": "service", "ip": "203.0.113.20", "port": 53, "protocol": "udp",
+   "service_type": "dns", "asn": "AS64500", "netblock": "203.0.113.0/24", "asserts_present": true},
+
+  {"entity_kind": "service", "ip": "198.51.100.44", "port": 80, "protocol": "tcp",
+   "service_type": "http", "asn": "AS64500", "netblock": "198.51.100.0/24", "asserts_present": false}
+]

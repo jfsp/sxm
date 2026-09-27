@@ -128,6 +128,9 @@ Each connector separates transport (`_fetch_live`) from parsing (`parse_*`), and
 parsers are unit-tested against sample payloads — adjust parsing to your tenant's exact
 schema in `api/app/connectors/impl.py` without touching the pipeline.
 
+For how to obtain/enable each vendor's API credentials (account setup, required plan
+tier, where to generate keys), see **`docs/api-keys-setup.md`**.
+
 ---
 
 ## Alerting channels
